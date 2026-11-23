@@ -1,0 +1,320 @@
+import os, textwrap, zipfile, json, re
+base="/mnt/data/ai_learning_assistant"
+os.makedirs(base, exist_ok=True)
+
+app_code = r'''import os
+import streamlit as st
+from google import genai
+from google.genai import types
+
+st.set_page_config(
+    page_title="LearnMate AI | Learning Assistant",
+    page_icon="🎓",
+    layout="wide",
+)
+
+st.markdown("""
+<style>
+    .main {background: #f7f9fc;}
+    .hero {
+        padding: 1.5rem 1.7rem;
+        border-radius: 18px;
+        background: linear-gradient(120deg, #e8f1ff, #f4eaff);
+        border: 1px solid #d9e5f5;
+        margin-bottom: 1rem;
+    }
+    .hero h1 {margin: 0; color: #17365d;}
+    .hero p {margin: .45rem 0 0; color: #43556b;}
+    .small-note {color: #607086; font-size: .9rem;}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="hero">
+  <h1>🎓 LearnMate AI</h1>
+  <p>Your friendly AI learning assistant — ask questions, understand topics, revise, and practise.</p>
+</div>
+""", unsafe_allow_html=True)
+
+with st.sidebar:
+    st.header("Learning tools")
+    mode = st.radio(
+        "Choose what you need",
+        ["Ask a question", "Explain a topic", "Make a summary", "Create a quiz"],
+    )
+    level = st.selectbox("Explanation level", ["Beginner", "School student", "College student"])
+    subject = st.text_input("Subject (optional)", placeholder="e.g. Python, Biology, Mathematics")
+    st.divider()
+    st.caption("Project: AI-Powered Learning Assistant")
+    st.caption("SDG 4 — Quality Education")
+    st.caption("Created by Vaishnavi Kolekar")
+
+def get_api_key():
+    # Streamlit Community Cloud secrets are preferred for deployment.
+    try:
+        secret_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        secret_key = ""
+    return secret_key or os.getenv("GEMINI_API_KEY", "")
+
+api_key = get_api_key()
+if not api_key:
+    st.warning("Gemini API key not found. Add GEMINI_API_KEY to your .env file or Streamlit secrets.")
+    st.code("GEMINI_API_KEY=your_api_key_here", language="bash")
+    st.info("Keep your API key private. Do not paste it into the app code or upload it to GitHub.")
+    st.stop()
+
+client = genai.Client(api_key=api_key)
+
+PROMPTS = {
+    "Ask a question": (
+        "Answer the student's question accurately and clearly. Use simple language, "
+        "short sections and an example when useful. If the question is unclear, ask one "
+        "brief clarifying question. Do not pretend to know facts you are unsure about."
+    ),
+    "Explain a topic": (
+        "Teach the requested topic to the student. Start with a simple definition, "
+        "then explain the main idea step by step, give one everyday example, and finish "
+        "with three key points to remember."
+    ),
+    "Make a summary": (
+        "Create concise study notes for the requested topic. Use a short introduction, "
+        "important points, key terms and a brief final recap. Do not add unsupported facts."
+    ),
+    "Create a quiz": (
+        "Create five beginner-friendly multiple-choice questions about the requested topic. "
+        "Give four options for each question. Put the answer key and a one-line explanation "
+        "after all five questions."
+    ),
+}
+
+def generate_response(user_text, chat_history):
+    context = f"Student level: {level}. Subject: {subject or 'Not specified'}.\n"
+    context += PROMPTS[mode] + "\n\n"
+    context += "Conversation so far:\n"
+    for item in chat_history[-8:]:
+        role = "Student" if item["role"] == "user" else "Tutor"
+        context += f"{role}: {item['content']}\n"
+    context += f"\nStudent's latest request: {user_text}\n"
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=context,
+        config=types.GenerateContentConfig(
+            temperature=0.4,
+            max_output_tokens=1200,
+        ),
+    )
+    return response.text or "I couldn't generate a response. Please try asking in a different way."
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+left, right = st.columns([3, 1])
+with left:
+    st.subheader("Your learning space")
+with right:
+    if st.button("Clear conversation", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+placeholder = {
+    "Ask a question": "e.g. Explain the difference between a list and a tuple in Python.",
+    "Explain a topic": "e.g. Explain supervised learning with a simple example.",
+    "Make a summary": "e.g. Make revision notes on artificial neural networks.",
+    "Create a quiz": "e.g. Create a quiz on Python loops.",
+}[mode]
+
+user_input = st.chat_input(placeholder)
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Preparing your learning response..."):
+            try:
+                answer = generate_response(user_input, st.session_state.messages[:-1])
+            except Exception as error:
+                answer = (
+                    "Sorry, I couldn't reach the AI service. Check your internet connection "
+                    "and API key, then try again. Technical detail: " + str(error)
+                )
+            st.markdown(answer)
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+
+st.markdown("---")
+st.markdown(
+    '<p class="small-note">LearnMate AI is an educational support tool. '
+    'Check important information with your teachers or trusted learning materials.</p>',
+    unsafe_allow_html=True,
+)
+'''
+with open(os.path.join(base,"app.py"),"w",encoding="utf-8") as f: f.write(app_code)
+
+requirements = """streamlit>=1.37.0
+google-genai>=1.0.0
+python-dotenv>=1.0.0
+"""
+with open(os.path.join(base,"requirements.txt"),"w") as f: f.write(requirements)
+
+env_example = """# Copy this file to .env and add your own Gemini API key.
+# Never commit .env to GitHub.
+GEMINI_API_KEY=your_api_key_here
+"""
+with open(os.path.join(base,".env.example"),"w") as f: f.write(env_example)
+
+gitignore = """.env
+.streamlit/secrets.toml
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+"""
+with open(os.path.join(base,".gitignore"),"w") as f: f.write(gitignore)
+
+readme = """# LearnMate AI — AI-Powered Learning Assistant
+
+**Capstone project:** SDG 4 — Quality Education  
+**Student:** Vaishnavi Kolekar  
+**College:** New Horizon College of Engineering  
+**GitHub username:** `obscurabyte_56`
+
+## What it does
+LearnMate AI is a Streamlit web app that uses Google's Gemini API to help students:
+- Ask questions and receive clear explanations
+- Learn a topic step by step
+- Generate short revision summaries
+- Create practice quizzes
+
+## Requirements
+- Python 3.10 or newer
+- A Gemini API key from https://aistudio.google.com/
+- Internet connection
+
+## Run locally (Windows)
+1. Open this folder in VS Code.
+2. Create and activate a virtual environment:
+
+   ```powershell
+   py -m venv .venv
+   .venv\\Scripts\\activate
+   ```
+
+3. Install packages:
+
+   ```powershell
+   pip install -r requirements.txt
+   ```
+
+4. Copy `.env.example` to `.env` and add your Gemini API key:
+
+   ```text
+   GEMINI_API_KEY=your_real_key
+   ```
+
+5. Start the app:
+
+   ```powershell
+   streamlit run app.py
+   ```
+
+The app will open in your browser, usually at `http://localhost:8501`.
+
+## GitHub upload
+Create a new public repository named `ai-powered-learning-assistant` under your GitHub account `obscurabyte_56`. Upload the project files, but **do not upload `.env` or your API key**.
+
+## Important project status
+This is a working starter implementation, not proof of completed testing. Run it with your own API key, test each feature, and capture screenshots of the actual running app before final submission. Add your test observations and screenshots to the final report.
+
+## Limitations
+- AI responses can be incorrect; students should verify important information.
+- The Gemini API requires an API key and is subject to its current usage limits and terms.
+- This prototype does not store user accounts, grades, or chat history permanently.
+"""
+with open(os.path.join(base,"README.md"),"w",encoding="utf-8") as f: f.write(readme)
+
+# Create PDF report with code appendix
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Preformatted, KeepTogether
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.lib.enums import TA_CENTER
+
+pdf_path="/mnt/data/AI_Powered_Learning_Assistant_Final_Report_with_Code.pdf"
+ss=getSampleStyleSheet()
+ss.add(ParagraphStyle(name="TitleC", parent=ss["Title"], fontSize=22, leading=27, alignment=TA_CENTER, textColor=colors.HexColor("#17365D"), spaceAfter=10))
+ss.add(ParagraphStyle(name="SubC", parent=ss["Normal"], fontSize=11, leading=16, alignment=TA_CENTER, textColor=colors.HexColor("#52606D")))
+ss.add(ParagraphStyle(name="HeadC", parent=ss["Heading1"], fontSize=15, leading=19, textColor=colors.HexColor("#17365D"), spaceBefore=10, spaceAfter=6))
+ss.add(ParagraphStyle(name="BodyC", parent=ss["BodyText"], fontSize=9.3, leading=13.5, spaceAfter=5))
+ss.add(ParagraphStyle(name="CodeC", fontName="Courier", fontSize=6.3, leading=7.4, leftIndent=5, rightIndent=5, spaceAfter=2))
+ss.add(ParagraphStyle(name="NoteC", parent=ss["BodyText"], fontSize=8.5, leading=12, backColor=colors.HexColor("#EEF4FA"), borderColor=colors.HexColor("#BCCCDC"), borderWidth=.5, borderPadding=7, spaceBefore=5, spaceAfter=7))
+def para(x,st="BodyC"): return Paragraph(x,ss[st])
+
+story=[Spacer(1,22*mm),para("AI-POWERED<br/>LEARNING ASSISTANT","TitleC"),
+       para("AI Capstone Project — Final Report Draft with Source Code","SubC"),Spacer(1,8*mm),
+       para("<b>Selected SDG:</b> SDG 4 — Quality Education","SubC"),Spacer(1,12*mm)]
+details=[
+    [para("<b>Student</b>"),para("Vaishnavi Kolekar")],
+    [para("<b>College</b>"),para("New Horizon College of Engineering")],
+    [para("<b>GitHub username</b>"),para("obscurabyte_56")],
+    [para("<b>Project technology</b>"),para("Python, Streamlit, Gemini API")],
+]
+tb=Table(details,colWidths=[45*mm,110*mm],rowHeights=[11*mm]*4)
+tb.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.4,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),8)]))
+story += [tb,Spacer(1,10*mm),para("<b>Project status:</b> This report includes a starter implementation and setup instructions. The application must be run and tested with a valid API key. Add real screenshots and actual test results before submitting it as a completed project.","NoteC"),PageBreak()]
+
+sections=[
+("1. Selected SDG and Reason for Selection",
+"Selected SDG: <b>SDG 4 — Quality Education.</b> This goal focuses on inclusive and equitable quality education and lifelong learning opportunities for everyone. This project was selected because students may need extra help while studying independently. A learning assistant can offer another way to ask questions, revise topics and practise concepts. It supports learning but does not replace teachers."),
+("2. Problem Statement",
+"Students sometimes find it difficult to understand topics when studying alone. They may have doubts, need simpler explanations or want practice questions when a teacher or tutor is not immediately available. This can happen at home, in schools and in colleges. Students who need additional learning support are affected. If doubts remain unresolved, students may lose confidence or struggle with later topics that depend on earlier concepts."),
+("3. Proposed Solution",
+"LearnMate AI is a web-based learning assistant. Students can select a learning mode and enter a question or topic. The application sends the request to the Gemini AI model and displays a response in the app. It supports question answering, topic explanations, short summaries and practice quizzes. The intended users are students who want additional support during self-study and revision."),
+("4. Project Features",
+"<b>Ask a question:</b> Students can type a question and receive a clear response.<br/><b>Explain a topic:</b> The app provides a beginner-friendly explanation with an example and key points.<br/><b>Make a summary:</b> The app creates concise revision notes on a topic.<br/><b>Create a quiz:</b> The app generates five multiple-choice questions with an answer key.<br/><b>Follow-up conversation:</b> Students can continue asking questions in the same session.<br/><b>Explanation level:</b> Users can choose a beginner, school or college level."),
+("5. Tools and Technologies",
+"Python is used for application logic. Streamlit provides the web interface. The Google Gen AI Python SDK connects the app to the Gemini API. VS Code can be used for development, and GitHub is used to store and share the source code. The API key is stored as an environment variable or Streamlit secret and must not be committed to the repository."),
+("6. How to Run the Application",
+"Install Python 3.10 or newer. Open the project folder in VS Code and run:<br/><font name='Courier'>py -m venv .venv</font><br/><font name='Courier'>.venv\\\\Scripts\\\\activate</font><br/><font name='Courier'>pip install -r requirements.txt</font><br/>Create a <font name='Courier'>.env</font> file containing <font name='Courier'>GEMINI_API_KEY=your_api_key_here</font>, then run:<br/><font name='Courier'>streamlit run app.py</font><br/>Get an API key from Google AI Studio. Keep the key private. The app normally opens at <font name='Courier'>http://localhost:8501</font>."),
+("7. Testing and Results — To Be Completed",
+"Test each mode using relevant sample prompts. Record the prompt, the actual response, whether it was useful, and any errors. Do not claim successful testing until the application has been run. Add real screenshots of the home screen, chatbot interaction, explanation, summary and quiz."),
+("8. GitHub Repository",
+"GitHub username: <b>obscurabyte_56</b><br/>Suggested repository name: <b>ai-powered-learning-assistant</b><br/>Repository URL: <b>To be added after creating and uploading to GitHub.</b><br/>Upload app.py, requirements.txt, README.md, .gitignore and .env.example. Do not upload .env, API keys or passwords."),
+("9. Conclusion",
+"LearnMate AI is a proposed educational support tool aligned with SDG 4 — Quality Education. It uses an AI chatbot interface to help students ask questions, understand topics, prepare summaries and practise. The project demonstrates a practical use of Python and generative AI in education. AI responses should be checked against trusted learning materials.")
+]
+for h,b in sections:
+    story += [para(h,"HeadC"),para(b)]
+story += [PageBreak(),para("Appendix A — Source Code (app.py)","HeadC"),
+          para("The following is the main application code. Supporting files (requirements.txt, README.md, .gitignore and .env.example) are included in the downloadable project ZIP.","BodyC")]
+# include code with line wrapping
+for i in range(0,len(app_code.splitlines()),48):
+    chunk="\n".join(app_code.splitlines()[i:i+48])
+    story.append(Preformatted(chunk, ss["CodeC"]))
+    story.append(Spacer(1,3*mm))
+story += [PageBreak(),para("Appendix B — Supporting Files","HeadC"),
+          para("<b>requirements.txt</b><br/>"+requirements.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br/>"),"BodyC"),
+          para("<b>.env.example</b><br/>"+env_example.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br/>"),"BodyC"),
+          para("<b>Final checklist</b><br/>□ Run the application with your own API key.<br/>□ Test all four learning modes.<br/>□ Capture screenshots of the running app.<br/>□ Record actual testing observations.<br/>□ Create the GitHub repository under obscurabyte_56.<br/>□ Upload the source files without secrets.<br/>□ Add the real repository URL to the report.<br/>□ Review the assignment portal for any extra submission fields.","BodyC")]
+def footer(canvas,doc):
+    canvas.saveState()
+    canvas.setStrokeColor(colors.HexColor("#D9E2EC")); canvas.line(18*mm,14*mm,A4[0]-18*mm,14*mm)
+    canvas.setFont("Helvetica",7.5); canvas.setFillColor(colors.HexColor("#627D98"))
+    canvas.drawString(18*mm,9*mm,"LearnMate AI | Capstone Report Draft")
+    canvas.drawRightString(A4[0]-18*mm,9*mm,f"Page {doc.page}")
+    canvas.restoreState()
+doc=SimpleDocTemplate(pdf_path,pagesize=A4,rightMargin=18*mm,leftMargin=18*mm,topMargin=16*mm,bottomMargin=20*mm)
+doc.build(story,onFirstPage=footer,onLaterPages=footer)
+
+zip_path="/mnt/data/LearnMate_AI_Project_Source_Code.zip"
+with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
+    for fn in ["app.py","requirements.txt","README.md",".gitignore",".env.example"]:
+        z.write(os.path.join(base,fn),arcname=f"LearnMate_AI/{fn}")
+
+print("Created:", pdf_path)
+print("Created:", zip_path)
